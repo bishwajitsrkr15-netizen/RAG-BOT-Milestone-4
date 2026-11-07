@@ -93,9 +93,9 @@ The UI presents the welcome message, three example questions, facts-only disclai
 
 For UI mockups, paste [`STITCH_UI_PROMPT.md`](./STITCH_UI_PROMPT.md) into Stitch to generate the welcome, answer, refusal, privacy, and error screens in desktop and mobile layouts.
 
-### Deploy to Streamlit Community Cloud
+### Deploy the original Streamlit app to Community Cloud
 
-This application uses Streamlit and should be deployed to Streamlit Community Cloud or another Streamlit host; it is not a Vercel app.
+The original Python app remains at `src/ui/app.py`.
 
 1. Push the project to a GitHub repository. Keep `.env` local; `.gitignore` excludes it. Commit the safe `.env.example` template instead.
 2. The app needs its persisted Chroma index to answer questions. The Chroma database and the `chunk-latest.json`, `load-latest.json`, and `vector-store-current.json` manifests are included for deployment. Raw downloaded HTML, source records, and standalone embeddings remain excluded.
@@ -110,6 +110,46 @@ This application uses Streamlit and should be deployed to Streamlit Community Cl
 The answer service reads API settings from the process environment, Streamlit secrets, or a local `.env` in that order. On deployment, use Streamlit secrets rather than uploading `.env`.
 
 The local vector index is a snapshot of the approved public pages at ingestion time. Refresh the index locally and push the updated Chroma database and manifests when the sources change.
+
+### Deploy the Next.js app to Vercel
+
+The repository also includes a Vercel-compatible Next.js UI and same-origin `/api/answer` endpoint. Unlike the Streamlit app, this version uses remote services so it does not depend on writable Vercel filesystem state or a local embedding model.
+
+#### Prepare the hosted vector index
+
+1. Create a Qdrant Cloud cluster and an API key with permission to create collections and upsert points.
+2. Set these values in a local PowerShell session (do not commit or paste secrets):
+
+   ```powershell
+   $env:QDRANT_URL = "https://<your-cluster>.qdrant.io"
+   $env:QDRANT_API_KEY = "<your-qdrant-api-key>"
+   $env:QDRANT_COLLECTION = "hdfc-mutual-funds"
+   ```
+
+3. Run the migration from the project root. It validates the local manifests, chunk hash, source allowlist, 384-dimensional vectors, and chunk/vector IDs, then uploads the 76 points:
+
+   ```powershell
+   python scripts/migrate_qdrant.py
+   ```
+
+The migration is idempotent and uses deterministic point IDs; rerunning it upserts the same points. Keep the local `data/chunks` and `data/embeddings` artifacts for later corpus refreshes.
+
+#### Connect Vercel
+
+1. Import the GitHub repository into Vercel. Use the repository root as the **Root Directory** and the **Next.js** framework preset. Vercel detects the root `package.json`; use `npm run build` as the build command and leave output settings at their defaults.
+2. In **Project Settings → Environment Variables**, add:
+   - `GROQ_API_KEY` — secret; Groq API key.
+   - `LLM_MODEL` — `qwen/qwen3.8-27b`.
+   - `HF_TOKEN` — secret; Hugging Face token with Inference Providers permission.
+   - `QDRANT_URL` — the HTTPS URL for the Qdrant cluster.
+   - `QDRANT_API_KEY` — secret; Qdrant API key.
+   - `QDRANT_COLLECTION` — `hdfc-mutual-funds`.
+3. Apply the variables to Preview and Production, save, and deploy. If variables are changed later, create a new deployment.
+4. Test a supported question, an unrelated question, and an advice question in the deployed UI.
+
+The Vercel API applies the same privacy, advice, performance, approved-source citation, and cosine-distance guardrails. It uses Hugging Face Inference for query vectors and Qdrant Cloud for retrieval. The local Streamlit app continues to use its local ChromaDB index and can be deployed separately to Community Cloud.
+
+Before sharing the Vercel URL publicly, configure a Vercel Firewall rate limit for `POST /api/answer`; the public endpoint calls metered embedding and LLM providers.
 
 ## Current limits
 

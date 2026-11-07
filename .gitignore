@@ -1,8 +1,14 @@
 .env
+.env.*
+!.env.example
 .venv/
 venv/
 __pycache__/
 *.py[cod]
+node_modules/
+.next/
+.vercel/
+*.tsbuildinfo
 
 # Generated ingestion and vector-store data
 data/raw/*
@@ -11,7 +17,7 @@ data/chunks/*
 data/embeddings/*
 data/manifests/*
 
-# Keep the local data directory structure and the deployment index/status.
+# Keep local data directory structure and the Streamlit deployment index/status.
 !data/raw/.gitkeep
 !data/loaded/.gitkeep
 !data/chunks/.gitkeep
