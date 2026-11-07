@@ -1,0 +1,10 @@
+{
+  "started_at": "2026-11-07T16:21:02.280638+00:00",
+  "completed_at": "2026-11-07T16:21:02.423055+00:00",
+  "mode": "load_saved_documents",
+  "expected_sources": 5,
+  "loaded_sources": 5,
+  "failed_sources": [],
+  "status": "success",
+  "output": "data\\loaded\\pages.jsonl"
+}

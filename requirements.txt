@@ -1,0 +1,4 @@
+PyYAML>=6.0,<7
+sentence-transformers>=3.0,<6.0
+chromadb>=0.5,<2.0
+streamlit>=1.40,<2.0

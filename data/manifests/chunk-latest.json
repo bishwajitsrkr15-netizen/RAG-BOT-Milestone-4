@@ -1,0 +1,18 @@
+{
+  "started_at": "2026-11-07T16:25:11.428952+00:00",
+  "completed_at": "2026-11-07T16:25:11.435025+00:00",
+  "mode": "chunk_loaded_documents",
+  "input": "data\\loaded\\pages.jsonl",
+  "output": "data\\chunks\\chunks.jsonl",
+  "max_chars": 1400,
+  "source_count": 5,
+  "chunk_count": 76,
+  "chunks_by_source": {
+    "hdfc-mutual-fund-amc": 18,
+    "hdfc-large-cap": 14,
+    "hdfc-flexi-cap": 15,
+    "hdfc-elss-tax-saver": 14,
+    "hdfc-mid-cap": 15
+  },
+  "status": "success"
+}

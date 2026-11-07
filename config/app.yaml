@@ -1,0 +1,60 @@
+sources:
+  - id: hdfc-mutual-fund-amc
+    url: https://groww.in/mutual-funds/amc/hdfc-mutual-funds
+  - id: hdfc-large-cap
+    url: https://groww.in/mutual-funds/hdfc-large-cap-fund-direct-growth
+  - id: hdfc-flexi-cap
+    url: https://groww.in/mutual-funds/hdfc-equity-fund-direct-growth
+  - id: hdfc-elss-tax-saver
+    url: https://groww.in/mutual-funds/hdfc-elss-tax-saver-fund-direct-plan-growth
+  - id: hdfc-mid-cap
+    url: https://groww.in/mutual-funds/hdfc-mid-cap-fund-direct-growth
+
+artifacts:
+  raw: data/raw
+  loaded: data/loaded
+  chunks: data/chunks
+  embeddings: data/embeddings
+  manifests: data/manifests
+
+embedding:
+  model: sentence-transformers/all-MiniLM-L6-v2
+
+vector_store:
+  provider: chromadb
+  path: data/chroma
+  collection: hdfc-mutual-funds
+  distance_metric: cosine
+
+llm:
+  provider: groq
+  model_env: LLM_MODEL
+  api_key_env: GROQ_API_KEY
+
+retrieval:
+  top_k: 4
+  # Cosine distance; calibrated against FAQ examples and unrelated queries.
+  minimum_relevance: 0.55
+
+scheme_aliases:
+  hdfc-mutual-fund-amc:
+    - HDFC Mutual Fund
+    - HDFC AMC
+    - HDFC Asset Management Company
+  hdfc-large-cap:
+    - HDFC Large Cap
+    - HDFC Large Cap Fund
+    - Large Cap
+  hdfc-flexi-cap:
+    - HDFC Flexi Cap
+    - HDFC Equity Fund
+    - Flexi Cap
+  hdfc-elss-tax-saver:
+    - HDFC ELSS
+    - HDFC Tax Saver
+    - ELSS
+    - Tax Saver
+  hdfc-mid-cap:
+    - HDFC Mid Cap
+    - HDFC Midcap
+    - Mid Cap

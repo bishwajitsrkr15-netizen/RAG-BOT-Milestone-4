@@ -1,0 +1,23 @@
+.env
+.venv/
+venv/
+__pycache__/
+*.py[cod]
+
+# Generated ingestion and vector-store data
+data/raw/*
+data/loaded/*
+data/chunks/*
+data/embeddings/*
+data/manifests/*
+
+# Keep the local data directory structure and the deployment index/status.
+!data/raw/.gitkeep
+!data/loaded/.gitkeep
+!data/chunks/.gitkeep
+!data/embeddings/.gitkeep
+!data/chroma/.gitkeep
+!data/manifests/.gitkeep
+!data/manifests/chunk-latest.json
+!data/manifests/load-latest.json
+!data/manifests/vector-store-current.json
