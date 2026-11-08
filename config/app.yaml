@@ -20,9 +20,17 @@ artifacts:
 embedding:
   model: sentence-transformers/all-MiniLM-L6-v2
 
-vector_store:
+local_index:
   provider: chromadb
   path: data/chroma
+  collection: hdfc-mutual-funds
+  distance_metric: cosine
+
+vector_store:
+  provider: qdrant
+  url_env: QDRANT_URL
+  api_key_env: QDRANT_API_KEY
+  collection_env: QDRANT_COLLECTION
   collection: hdfc-mutual-funds
   distance_metric: cosine
 

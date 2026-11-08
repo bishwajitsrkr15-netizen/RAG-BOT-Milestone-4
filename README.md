@@ -52,31 +52,37 @@ python -m src.ingestion.embed_documents --config config/app.yaml
 
 The embedding stage reads `data/chunks/chunks.jsonl`, embeds each chunk using the configured model (`sentence-transformers/all-MiniLM-L6-v2`), normalizes the vectors, and saves each vector beside its `chunk_id` in `data/embeddings/vectors.jsonl`. The manifest at `data/manifests/embedding-latest.json` records the model, input hash, batch size, vector count, and dimensions. Override batch size with `--batch-size`.
 
-### 5. Store embeddings in ChromaDB
+### 5. Build the local staging index
 
-After embeddings are generated:
+This step validates the local corpus and stores a staging copy in ChromaDB. The deployed Streamlit app queries Qdrant Cloud, not this local database.
 
 ```powershell
 python -m src.ingestion.store_vectors --config config/app.yaml
 ```
 
-The storage phase checks the chunk/vector IDs, dimensions, finite normalized values, embedding model, and chunk-file hash before writing. It creates a persistent, versioned cosine-distance collection under `data/chroma/`, storing each vector with its chunk text and citation metadata. Rerunning the same inputs upserts the same IDs into the same collection. Run status is saved to `data/manifests/vector-store-latest.json`; `vector-store-current.json` points to the last successfully verified collection and is not changed by a failed run.
+The staging phase checks chunk/vector IDs, dimensions, finite normalized values, embedding model, and chunk-file hash before writing. Its verified local ChromaDB collection is used as the input to the Qdrant migration script. Run status is saved to `data/manifests/vector-store-latest.json`; `vector-store-current.json` points to the last successfully verified local staging index.
 
-### 6. Retrieve evidence and answer a factual question
+### 6. Migrate to Qdrant and retrieve evidence
 
-Query the verified vector index:
+Set Qdrant Cloud credentials in your local PowerShell session (or use an authorized local Qdrant server for development):
+
+```powershell
+$env:QDRANT_URL = "https://<your-cluster>.qdrant.io"
+$env:QDRANT_API_KEY = "<your-qdrant-api-key>"
+$env:QDRANT_COLLECTION = "hdfc-mutual-funds"
+python scripts/migrate_qdrant.py
+```
+
+The migration validates the local manifests, chunk hash, approved URLs, 384-dimensional normalized vectors, and chunk/vector IDs. It creates the cosine collection if needed and uploads deterministic point IDs with text and citation metadata. Re-running it is idempotent.
+
+Retrieve from Qdrant and generate a concise answer:
 
 ```powershell
 python -m src.retrieval.retrieve "What is the expense ratio of HDFC Large Cap Fund?"
-```
-
-Generate a concise answer from retrieved evidence:
-
-```powershell
 python -m src.retrieval.answer "What is the expense ratio of HDFC Large Cap Fund?"
 ```
 
-Retrieval uses the configured embedding model, persistent ChromaDB collection, and cosine-distance cutoff (`0.55`). A recognized scheme name filters retrieval to that scheme's source page; weak matches are discarded. The cutoff was checked against representative FAQ phrasings (supported matches up to about `0.53`) and unrelated questions (above `0.82`); recalibrate it if the corpus or embedding model changes.
+The application embeds each query with the configured sentence-transformers model, searches Qdrant using cosine similarity, and applies the configured cosine-distance cutoff (`0.55`). A recognized scheme name filters retrieval to that source page. Results are accepted only when their source ID and URL match the approved source allowlist. The cutoff was checked against representative FAQ phrasings and unrelated queries; recalibrate it if the corpus or embedding model changes.
 
 The answer flow checks sensitive identifiers and advice/performance intent before retrieval or LLM calls. It does not call the LLM when evidence is missing. Groq uses `GROQ_API_KEY` and `LLM_MODEL` from the process environment or local `.env`; model defaults to `qwen/qwen3.8-27b`. The model is instructed not to emit citations; the application attaches one approved source URL from retrieved metadata. Returned fields include answer status, source link, and `Last updated from sources: ...`. A verified page update date is currently unavailable for the ingested pages.
 
@@ -98,18 +104,21 @@ For UI mockups, paste [`STITCH_UI_PROMPT.md`](./STITCH_UI_PROMPT.md) into Stitch
 The original Python app remains at `src/ui/app.py`.
 
 1. Push the project to a GitHub repository. Keep `.env` local; `.gitignore` excludes it. Commit the safe `.env.example` template instead.
-2. The app needs its persisted Chroma index to answer questions. The Chroma database and the `chunk-latest.json`, `load-latest.json`, and `vector-store-current.json` manifests are included for deployment. Raw downloaded HTML, source records, and standalone embeddings remain excluded.
+2. Create and populate a Qdrant Cloud collection using the migration steps above. Streamlit queries Qdrant directly; the local Chroma index is only an ingestion staging artifact and is not required by the deployed app.
 3. Create a Community Cloud app from the repository and set its main file to `src/ui/app.py`.
-4. In the app's **Settings → Secrets**, add the values below, replacing the placeholder with your own key. Do not commit this file or paste the key into chat.
+4. In the app's **Settings → Secrets**, add the values below, replacing the placeholders with your credentials. Do not commit these values or paste them into chat.
 
    ```toml
    GROQ_API_KEY = "your_groq_api_key_here"
    LLM_MODEL = "qwen/qwen3.8-27b"
+   QDRANT_URL = "https://your-cluster.qdrant.io"
+   QDRANT_API_KEY = "your_qdrant_api_key_here"
+   QDRANT_COLLECTION = "hdfc-mutual-funds"
    ```
 
-The answer service reads API settings from the process environment, Streamlit secrets, or a local `.env` in that order. On deployment, use Streamlit secrets rather than uploading `.env`.
+The answer and retrieval services read settings from process environment, Streamlit secrets, or the local `.env` in that order. On deployment, use Streamlit secrets rather than uploading `.env`.
 
-The local vector index is a snapshot of the approved public pages at ingestion time. Refresh the index locally and push the updated Chroma database and manifests when the sources change.
+At runtime, the Streamlit UI checks the configured Qdrant collection and reports its point count. Refresh source data by rerunning ingestion and `scripts/migrate_qdrant.py`; the upload replaces the same deterministic point IDs.
 
 ### Deploy the Next.js app to Vercel
 
@@ -147,7 +156,7 @@ The migration is idempotent and uses deterministic point IDs; rerunning it upser
 3. Apply the variables to Preview and Production, save, and deploy. If variables are changed later, create a new deployment.
 4. Test a supported question, an unrelated question, and an advice question in the deployed UI.
 
-The Vercel API applies the same privacy, advice, performance, approved-source citation, and cosine-distance guardrails. It uses Hugging Face Inference for query vectors and Qdrant Cloud for retrieval. The local Streamlit app continues to use its local ChromaDB index and can be deployed separately to Community Cloud.
+The Vercel API applies the same privacy, advice, performance, approved-source citation, and cosine-distance guardrails. It uses Hugging Face Inference for query vectors and Qdrant Cloud for retrieval. Streamlit and Vercel use the same Qdrant collection; Streamlit computes query embeddings locally with sentence-transformers.
 
 Before sharing the Vercel URL publicly, configure a Vercel Firewall rate limit for `POST /api/answer`; the public endpoint calls metered embedding and LLM providers.
 

@@ -15,7 +15,7 @@ project/
     loaded/
     chunks/
     embeddings/
-    chroma/
+    chroma/                 # Local ingestion staging only; runtime uses Qdrant
     manifests/
   src/
     ingestion/
@@ -36,8 +36,8 @@ project/
 ### Setup tasks
 
 - Choose a lightweight language/framework and create its dependency manifest, test setup, and run commands.
-- Put source URLs, storage paths, embedding model, vector database, LLM provider/model, and retrieval settings in `config/app.yaml`.
-- Configure the initial embedding model as `sentence-transformers/all-MiniLM-L6-v2`, vector database as ChromaDB, and provider as Groq.
+- Put source URLs, storage paths, embedding model, Qdrant runtime settings, local staging settings, LLM provider/model, and retrieval settings in `config/app.yaml`.
+- Configure the runtime vector database as Qdrant Cloud and the local ingestion staging index as ChromaDB.
 - Read `GROQ_API_KEY` and `LLM_MODEL` from a local `.env`; document `qwen/qwen3.8-27b` as the requested initial model. Add only placeholders to `.env.example`.
 - Ignore `.env`, generated data, and local ChromaDB files in `.gitignore`.
 - Configure only the five approved Groww URLs from the PRD. Do not follow links from those pages.
@@ -106,20 +106,20 @@ This phase reads the saved files only; it performs no network requests.
 
 **Tests:** vector count matches chunk count; vectors map to the correct IDs; query and document embedding configuration match; invalid output is rejected.
 
-## 6. Store vectors in ChromaDB
+## 6. Build the local staging index and publish to Qdrant
 
 ### Implementation
 
-1. Create a persistent ChromaDB collection using the configured path, collection name, and documented distance metric.
-2. Store each embedding with its stable chunk ID, text, URL, and source/chunk metadata.
-3. Use deterministic IDs and upsert so reruns do not duplicate unchanged content.
-4. Update changed content and remove obsolete records only during a successful, explicit rebuild.
-5. Do not replace the last known-good index when ingestion is partial or invalid.
-6. Save a final ingestion manifest with stage counts, model/config identifiers, timestamps, and per-source status.
+1. Write verified vectors to a local ChromaDB staging collection and save the staging manifest.
+2. Before migration, validate the chunk hash, embedding manifest, chunk/vector ID alignment, vector dimensions, normalization, and approved source URLs.
+3. Create or validate the configured Qdrant cosine collection.
+4. Upload deterministic point IDs with text, source ID, approved URL, title, and chunk metadata. Use upsert so repeated migrations do not duplicate points.
+5. Keep Qdrant credentials in environment variables for local migration and in Streamlit/Vercel secrets for hosted apps.
+6. Report migration failures explicitly; never treat a partial or invalid upload as successful.
 
-**Edge cases:** interrupted writes, stale records, partial source failures, incompatible embedding models, and ChromaDB unavailable.
+**Edge cases:** interrupted writes, stale records, partial source failures, incompatible embedding models or collection dimensions, Qdrant timeouts/authentication failures, and unavailable local staging.
 
-**Tests:** repeated ingestion keeps record count stable; changed chunks update; metadata is retrievable; incompatible model settings cannot silently reuse the collection; partial runs preserve the previous good index.
+**Tests:** repeated migration keeps Qdrant point count stable; payloads are retrievable; incompatible dimensions/metrics and unapproved URLs are rejected; partial failures are visible.
 
 ## 7. Retrieval logic and user interface
 
@@ -128,8 +128,8 @@ This phase reads the saved files only; it performs no network requests.
 1. Accept a text question without requiring a user account or identity.
 2. Run guardrails before embedding or calling the LLM.
 3. Embed an eligible factual question with the configured corpus embedding model.
-4. Query the configured ChromaDB collection for a small configurable `top_k`.
-5. Apply a relevance threshold calibrated for the chosen distance metric. If no relevant evidence is found, respond that the fact was not found in available sources.
+4. Query Qdrant for a small configurable `top_k`, filtering by a recognized scheme when possible.
+5. Convert Qdrant cosine similarity scores to cosine distances and apply the configured threshold. Reject payloads whose source ID or URL is not allowlisted. If no relevant evidence is found, respond that the fact was not found in available sources.
 6. Send only the question and relevant retrieved excerpts to the configured LLM provider (Groq initially). The prompt must require evidence-only, facts-only answers and must not ask the model to generate URLs.
 7. Validate the response, then attach exactly one source link from retrieved metadata in application code.
 8. Include `Last updated from sources: ` followed by a verifiable source date or a clear statement that the source update date is unavailable. Do not confuse fetch time with source update time.
@@ -147,7 +147,7 @@ Include:
 
 Do not persist question history or display raw errors, credentials, or local file paths.
 
-**Tests:** factual queries retrieve relevant scheme evidence; unknown queries avoid unsupported generation; citations point to retrieved sources; freshness wording and sentence limits are enforced; UI shows required content and error states.
+**Tests:** mocked Qdrant tests verify request filtering, score conversion, thresholding, and citation allowlisting; factual queries retrieve relevant scheme evidence; unknown queries avoid unsupported generation; freshness wording and sentence limits are enforced; UI shows required content and error states.
 
 ## 8. Guardrails, edge cases, and tests
 
@@ -171,7 +171,7 @@ Do not persist question history or display raw errors, credentials, or local fil
 ### General test cases
 
 - **Unit tests:** config validation, URL allowlist, extraction, chunk boundaries/IDs, embedding shape, privacy detection, intent routing, citation selection, freshness formatting, sentence limit.
-- **Pipeline integration:** controlled page fixtures through loading → chunking → embedding → ChromaDB; inspect saved artifacts and rerun for idempotency.
+- **Pipeline integration:** controlled page fixtures through loading → chunking → embedding → Chroma staging → mocked Qdrant migration; inspect saved artifacts and rerun for idempotency.
 - **Retrieval integration:** known factual questions retrieve the right scheme; unrelated questions return no-evidence behavior.
 - **UI checks:** welcome line, three examples, disclaimer, citation, refusal, privacy, no-evidence, and error states.
 - **Provider tests:** mock successful and failed Groq responses; routine tests must not require live credentials.
@@ -180,7 +180,7 @@ Do not persist question history or display raw errors, credentials, or local fil
 
 - [ ] Data-loading, chunking, embedding, and vector-store outputs are separately inspectable.
 - [ ] Only the five configured URLs are ingested; no linked pages are crawled.
-- [ ] ChromaDB is persistent and ingestion is idempotent.
+- [ ] Qdrant is the runtime vector database and the migration is idempotent; ChromaDB is used only as local staging.
 - [ ] Retrieval uses the same embedding model as ingestion and has a tested relevance threshold.
 - [ ] Each factual answer is supported, at most three sentences, has exactly one source link, and includes source freshness text.
 - [ ] Advice, performance, PII, low-evidence, and provider-failure guardrails pass tests.

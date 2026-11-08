@@ -207,11 +207,11 @@ def store_vectors(
         raise ScrapeError("Configuration must be a YAML object")
     artifacts = config.get("artifacts", {})
     embedding_config = config.get("embedding", {})
-    vector_config = config.get("vector_store", {})
+    vector_config = config.get("local_index", config.get("vector_store", {}))
     if not all(isinstance(value, dict) for value in (artifacts, embedding_config, vector_config)):
         raise ScrapeError("Config must contain artifact, embedding, and vector-store settings")
     if vector_config.get("provider") != "chromadb":
-        raise ScrapeError("Only the configured chromadb vector-store provider is supported")
+        raise ScrapeError("Only the local chromadb staging provider is supported")
 
     chunks_path = Path(artifacts.get("chunks", "data/chunks")) / "chunks.jsonl"
     embeddings_dir = Path(artifacts.get("embeddings", "data/embeddings"))
@@ -229,9 +229,9 @@ def store_vectors(
     if not isinstance(model_name, str) or not model_name.strip():
         raise ScrapeError("Config must specify embedding.model")
     if not isinstance(collection_base, str) or not collection_base:
-        raise ScrapeError("Config must specify vector_store.collection")
+        raise ScrapeError("Config must specify local_index.collection")
     if not isinstance(distance_metric, str):
-        raise ScrapeError("Config vector_store.distance_metric must be a string")
+        raise ScrapeError("Config local_index.distance_metric must be a string")
 
     started_at = datetime.now(timezone.utc).isoformat()
     try:

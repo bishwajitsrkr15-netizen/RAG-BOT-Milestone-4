@@ -2,14 +2,14 @@
 
 from __future__ import annotations
 
-import json
 import logging
 from pathlib import Path
-from typing import Any
 
 import streamlit as st
 
+from src.ingestion.scrape_documents import ScrapeError
 from src.retrieval.answer import AnswerError, AnswerResponse, answer_question
+from src.retrieval.retrieve import qdrant_index_status
 
 
 LOGGER = logging.getLogger(__name__)
@@ -22,31 +22,13 @@ EXAMPLE_QUESTIONS = (
 )
 
 
-def _read_manifest(name: str) -> dict[str, Any]:
-    path = ROOT / "data" / "manifests" / name
-    try:
-        content = json.loads(path.read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError):
-        return {}
-    return content if isinstance(content, dict) else {}
-
-
 def _corpus_status() -> tuple[str, str]:
-    vector_manifest = _read_manifest("vector-store-current.json")
-    load_manifest = _read_manifest("load-latest.json")
-    chunk_manifest = _read_manifest("chunk-latest.json")
-    if (
-        vector_manifest.get("status") != "success"
-        or load_manifest.get("status") != "success"
-        or chunk_manifest.get("status") != "success"
-    ):
-        return "Corpus status unavailable", "The indexed corpus could not be verified."
-    source_count = load_manifest.get("loaded_sources", 0)
-    chunk_count = vector_manifest.get("stored_count", 0)
-    return (
-        f"{source_count} public sources · {chunk_count} searchable chunks",
-        "Index verified",
-    )
+    try:
+        source_count, point_count = qdrant_index_status(CONFIG_PATH)
+    except ScrapeError as exc:
+        LOGGER.warning("Unable to verify Qdrant index (%s): %s", type(exc).__name__, exc)
+        return "Qdrant index unavailable", "Check Qdrant app secrets and collection"
+    return f"{source_count} approved sources · {point_count} searchable chunks", "Qdrant index verified"
 
 
 def _render_response(response: AnswerResponse) -> None:

@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import argparse
 import json
-import os
 import re
 import sys
 from dataclasses import asdict, dataclass
@@ -14,12 +13,10 @@ from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
 
 import yaml
-import streamlit as st
-from streamlit.errors import StreamlitSecretNotFoundError
-
 from src.guardrails.query_guard import GuardResult, Intent, inspect_question
 from src.ingestion.scrape_documents import ScrapeError
 from src.retrieval.retrieve import RetrievedChunk, identify_scheme, retrieve
+from src.settings import read_setting
 
 
 GROQ_CHAT_COMPLETIONS_URL = "https://api.groq.com/openai/v1/chat/completions"
@@ -127,33 +124,10 @@ def _privacy_or_intent_response(
 
 
 def _read_env_setting(key_name: str, project_root: Path) -> str | None:
-    environment_value = os.environ.get(key_name)
-    if environment_value:
-        return environment_value
-
     try:
-        secret_value = st.secrets.get(key_name)
-    except StreamlitSecretNotFoundError:
-        secret_value = None
-    if isinstance(secret_value, str) and secret_value:
-        return secret_value
-
-    env_path = project_root / ".env"
-    try:
-        lines = env_path.read_text(encoding="utf-8").splitlines()
-    except FileNotFoundError:
-        return None
+        return read_setting(key_name, project_root)
     except OSError as exc:
         raise AnswerError(f"Unable to read local environment file: {exc}") from exc
-    for line in lines:
-        stripped = line.strip()
-        if not stripped or stripped.startswith("#") or "=" not in stripped:
-            continue
-        name, value = stripped.split("=", 1)
-        if name.strip() == key_name:
-            value = value.strip().strip("\"'")
-            return value or None
-    return None
 
 
 def _groq_complete(

@@ -2,7 +2,7 @@
 
 ## 1. Overview
 
-The prototype is a small retrieval-augmented generation (RAG) application. A batch ingestion pipeline fetches a fixed allowlist of public pages, extracts and persists page text, creates traceable chunks, embeds them, and stores them in ChromaDB. At question time, the application applies privacy and intent checks, retrieves relevant chunks, and generates a short answer grounded in those chunks. The application validates the response and supplies its citation and source freshness from trusted retrieval metadata.
+The prototype is a small retrieval-augmented generation (RAG) application. A batch ingestion pipeline fetches a fixed allowlist of public pages, extracts and persists page text, creates traceable chunks, and embeds them. ChromaDB is a local staging index for the validated migration workflow; Qdrant Cloud is the runtime vector database used by both the Streamlit and Next.js applications. At question time, the application applies privacy and intent checks, retrieves relevant chunks from Qdrant, and generates a short answer grounded in those chunks.
 
 The architecture prioritizes inspectable intermediate data and a small deployment footprint. It does not crawl page links or connect to user investment accounts.
 
@@ -12,8 +12,9 @@ The architecture prioritizes inspectable intermediate data and a small deploymen
 
 - **Approved public pages:** The five Groww pages listed in the PRD; they are the only initial ingestion targets.
 - **Embedding model:** `sentence-transformers/all-MiniLM-L6-v2`, configured once and shared by ingestion and query-time retrieval.
-- **Vector store:** ChromaDB, configured for persistent local storage.
-- **LLM provider:** Groq for the initial prototype. The API key and selected model are supplied through environment variables loaded from a local `.env` file.
+- **Runtime vector store:** Qdrant Cloud, configured with a 384-dimensional cosine collection.
+- **Local staging index:** ChromaDB, used by the ingestion pipeline before validated points are migrated to Qdrant.
+- **LLM provider:** Groq for the initial prototype. The API key and selected model are supplied through environment variables, Streamlit secrets, or a local `.env` file.
 - **Future provider adapters:** Gemini, OpenAI, Anthropic, and Mistral may be added behind the same LLM interface. They are not considered supported until their integrations are implemented and tested.
 
 ### In scope
@@ -39,7 +40,8 @@ The architecture prioritizes inspectable intermediate data and a small deploymen
 | Stage artifact store | Saves inspectable outputs for loading, chunking, and embedding under a configured data directory. It does not store user queries. |
 | Chunker | Splits extracted content into semantically coherent, fact-preserving chunks and attaches source/page/location metadata. |
 | Embedding service | Embeds corpus chunks and incoming questions using the same configured model. |
-| Chroma repository | Persists chunk embeddings and metadata; supports deterministic upsert/rebuild and similarity retrieval. |
+| Local staging repository | Persists and validates chunk embeddings in ChromaDB before migration. |
+| Qdrant repository | Stores the runtime vectors and payloads; performs cosine search with optional source filtering. |
 | Query guard | Rejects or redirects advice/performance requests and screens for personal/account identifiers before any LLM call. |
 | Retriever | Retrieves the most relevant chunks and applies a configured relevance threshold before generation. |
 | LLM adapter | Calls the configured provider using retrieved context and strict facts-only response instructions. |
@@ -56,8 +58,9 @@ The architecture prioritizes inspectable intermediate data and a small deploymen
 4. Create deterministic chunks that preserve headings and nearby labels with their values. Attach a stable chunk ID, source URL, page title, section/position, and source-date metadata.
 5. Persist chunk records in the chunking-stage output.
 6. Embed all chunks with the configured sentence-transformers model and persist the vectors and associated chunk IDs/metadata in the embedding-stage output.
-7. Upsert vectors into the configured ChromaDB collection. Use stable IDs and a version/fingerprint of the source content so reruns update changed pages instead of silently duplicating entries.
-8. Persist an ingestion manifest with source status, timestamps, configuration/model identifiers, record counts, and failures. Report individual fetch/parse failures rather than marking a partial run as fully successful.
+7. Store validated vectors in the local ChromaDB staging index and persist its verification manifest.
+8. Run `scripts/migrate_qdrant.py` to validate the manifests, source allowlist, chunk/vector alignment, dimensions, and normalized vectors, then upsert deterministic point IDs and source metadata into Qdrant.
+9. Report migration failures explicitly; rerunning the migration upserts the same point IDs.
 
 Illustrative local artifact layout:
 
@@ -82,7 +85,7 @@ The exact file formats may follow the implementation's libraries, but each proce
 1. The UI sends a question to the application without a user identity or account context.
 2. The query guard checks for advice/performance intent and sensitive identifiers. Advice and portfolio requests receive a fixed polite refusal with one relevant educational link where available. Performance questions receive a no-calculation response and an approved factsheet link only if configured.
 3. For eligible factual questions, normalize the query without changing its meaning and embed it with the same model/version used for the indexed corpus.
-4. Query ChromaDB for the top relevant chunks. If retrieval is empty or below the configured relevance threshold, use a transparent “not found in available sources” answer rather than calling the LLM with unsupported context.
+4. Embed the query with the corpus model and query Qdrant for the top relevant chunks, optionally filtering to a recognized scheme. Convert Qdrant cosine scores to cosine distances and apply the configured threshold. If retrieval is empty or below threshold, use a transparent “not found in available sources” answer rather than calling the LLM with unsupported context.
 5. Send the question and retrieved excerpts to the configured LLM adapter. The prompt requires an answer of no more than three sentences, prohibits unsupported facts and advice, and asks for no link generation.
 6. Validate the generated text. Select one citation from the retrieved source metadata in application code, rather than trusting a model-generated URL. Attach `Last updated from sources: ` and the best available verified source date/update metadata; if none exists, explicitly state that a reliable date is unavailable.
 7. If the response cannot be validated or the provider fails, return a clear error or safe factual fallback with an applicable source link; never present a failed generation as a successful answer.
@@ -117,11 +120,11 @@ The exact file formats may follow the implementation's libraries, but each proce
 | `content_hash` | Chunk fingerprint for idempotent indexing. |
 | `source_updated_at` | Verifiable page date, if available. |
 
-The same chunk metadata accompanies its embedding in ChromaDB. API credentials and user question history are not part of either record.
+The same chunk metadata accompanies its embedding as a Qdrant point payload; ChromaDB retains a local staging copy. API credentials and user question history are not part of either record.
 
 ## 6. Retrieval and answer policy
 
-- Use the configured embedding model and vector collection consistently for both ingestion and queries. A model change requires re-embedding and rebuilding or versioning the collection.
+- Use the configured embedding model and Qdrant collection consistently for ingestion and queries. A model change requires re-embedding and rebuilding or versioning the collection.
 - Retrieve a small configurable number of chunks. Prefer evidence that directly answers the requested fact and keep chunks from unrelated schemes separate.
 - Apply a relevance threshold; a nearest-neighbor result alone does not establish that the answer is supported.
 - Keep each answer within three sentences, including its freshness text and citation presentation where sentence counting applies.
@@ -154,26 +157,33 @@ sources:
 embedding:
   model: sentence-transformers/all-MiniLM-L6-v2
 vector_store:
+  provider: qdrant
+  url_env: QDRANT_URL
+  api_key_env: QDRANT_API_KEY
+  collection_env: QDRANT_COLLECTION
+  collection: hdfc-mutual-funds
+local_index:
   provider: chromadb
   path: data/chroma
   collection: hdfc-mutual-funds
+  distance_metric: cosine
 llm:
   provider: groq
   model_env: LLM_MODEL
   api_key_env: GROQ_API_KEY
 retrieval:
   top_k: 4
-  minimum_relevance: 0.0 # Set and validate against the chosen distance metric.
+  minimum_relevance: 0.55
 ```
 
-The example relevance value is a placeholder: choose and test a threshold appropriate to the configured Chroma distance metric before relying on it. Load the requested initial model identifier, `qwen/qwen3.8-27b`, from `LLM_MODEL` rather than hard-coding it. Provide a local `.env.example` with variable names and placeholder values only.
+The relevance cutoff is a cosine distance; Qdrant's similarity score is converted to distance before applying it. Load the requested initial model identifier, `qwen/qwen3.8-27b`, from `LLM_MODEL` rather than hard-coding it. Provide a local `.env.example` with variable names and placeholder values only.
 
-For a lightweight prototype, run ingestion as an explicit command and serve the small UI as a separate application process. Persist ChromaDB and stage artifacts in the configured local data directory. Deployment may use an app or notebook, as allowed by the PRD; do not make hosting a prerequisite for the demo.
+Run ingestion and migration as explicit commands. Streamlit Community Cloud and Vercel connect to the same Qdrant collection using host-side secrets; the deployed Streamlit app does not depend on the local Chroma staging index.
 
 ## 9. Failure handling and observability
 
 - A source fetch or parse failure is recorded per URL; a run with missing pages is reported as partial and must not silently overwrite a previously good index with incomplete data.
-- Embedding or vector-store failures stop the affected pipeline stage and are reported with actionable, non-secret details.
+- Embedding, local staging, Qdrant migration, or Qdrant query failures stop the affected operation and are reported with actionable, non-secret details.
 - A missing provider key, unsupported provider/model, or LLM timeout is surfaced explicitly; do not return a fabricated or success-shaped answer.
 - Track operational counts and durations for loaded pages, chunks, embedded records, indexed records, and retrieval results. Do not log full questions or sensitive identifiers.
 - Make the current corpus manifest and processing-stage artifacts available for the demonstration.
@@ -181,7 +191,7 @@ For a lightweight prototype, run ingestion as an explicit command and serve the 
 ## 10. Verification strategy
 
 - Unit tests: URL allowlist/no-follow behavior, extraction metadata, deterministic chunk IDs, privacy screening, advice/performance intent handling, citation selection, sentence limits, and freshness formatting.
-- Pipeline tests: run loading → chunking → embedding → Chroma upsert using a small fixture or controlled test source; verify stage artifacts and idempotent reruns.
+- Pipeline tests: run loading → chunking → embedding → local Chroma staging and mock Qdrant migration; verify stage artifacts, payloads, and idempotent reruns.
 - Retrieval tests: confirm known factual questions retrieve the appropriate scheme/source, while unrelated or unsupported queries trigger the no-evidence behavior.
 - UI checks: welcome line, three examples, disclaimer, one visible citation, and refusal behavior.
 - Provider tests: exercise the configured adapter with mocked responses and verify missing-key/provider failures are explicit. Avoid requiring live credentials in routine tests.

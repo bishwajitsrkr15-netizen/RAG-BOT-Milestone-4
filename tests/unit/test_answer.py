@@ -56,7 +56,7 @@ class AnswerTests(unittest.TestCase):
 
     def test_reads_streamlit_secrets_when_environment_variable_is_missing(self) -> None:
         with patch.dict(os.environ, {}, clear=True):
-            with patch("src.retrieval.answer.st.secrets", {"GROQ_API_KEY": "test-key"}):
+            with patch("src.settings.st.secrets", {"GROQ_API_KEY": "test-key"}):
                 result = _read_env_setting("GROQ_API_KEY", Path(self.temp.name))
 
         self.assertEqual(result, "test-key")
