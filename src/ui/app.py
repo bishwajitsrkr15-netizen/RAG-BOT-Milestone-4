@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import logging
 from pathlib import Path
 from typing import Any
 
@@ -11,6 +12,7 @@ import streamlit as st
 from src.retrieval.answer import AnswerError, AnswerResponse, answer_question
 
 
+LOGGER = logging.getLogger(__name__)
 ROOT = Path(__file__).resolve().parents[2]
 CONFIG_PATH = ROOT / "config" / "app.yaml"
 EXAMPLE_QUESTIONS = (
@@ -413,7 +415,8 @@ def main() -> None:
                 response = answer_question(question_to_answer, CONFIG_PATH)
             with st.container(border=True):
                 _render_response(response)
-        except AnswerError:
+        except AnswerError as exc:
+            LOGGER.warning("FAQ answer request failed (%s): %s", type(exc).__name__, exc)
             st.info("The assistant couldn't complete that request. Please try again shortly.")
 
     st.markdown(
