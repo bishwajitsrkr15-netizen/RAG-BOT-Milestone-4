@@ -254,6 +254,19 @@ def _ensure_collection(
         )
 
 
+def _ensure_source_id_index(
+    base_url: str,
+    collection: str,
+    api_key: str,
+) -> None:
+    _request(
+        f"{base_url}/collections/{collection}/index",
+        api_key,
+        method="PUT",
+        body={"field_name": "source_id", "field_schema": "keyword"},
+    )
+
+
 def migrate(collection_override: str | None, batch_size: int) -> int:
     base_url = os.environ.get("QDRANT_URL", "").strip().rstrip("/")
     parsed_url = urlsplit(base_url)
@@ -276,6 +289,7 @@ def migrate(collection_override: str | None, batch_size: int) -> int:
     config = _load_config(ROOT / "config" / "app.yaml")
     points, _ = _verified_local_records(config)
     _ensure_collection(base_url, collection, api_key)
+    _ensure_source_id_index(base_url, collection, api_key)
     for start in range(0, len(points), batch_size):
         batch = points[start : start + batch_size]
         _request(

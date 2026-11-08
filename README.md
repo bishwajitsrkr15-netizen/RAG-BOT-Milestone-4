@@ -73,7 +73,7 @@ $env:QDRANT_COLLECTION = "hdfc-mutual-funds"
 python scripts/migrate_qdrant.py
 ```
 
-The migration validates the local manifests, chunk hash, approved URLs, 384-dimensional normalized vectors, and chunk/vector IDs. It creates the cosine collection if needed and uploads deterministic point IDs with text and citation metadata. Re-running it is idempotent.
+The migration validates the local manifests, chunk hash, approved URLs, 384-dimensional normalized vectors, and chunk/vector IDs. It creates the cosine collection and the keyword payload index required for `source_id` filtering if needed, then uploads deterministic point IDs with text and citation metadata. Re-running it is idempotent.
 
 Retrieve from Qdrant and generate a concise answer:
 
