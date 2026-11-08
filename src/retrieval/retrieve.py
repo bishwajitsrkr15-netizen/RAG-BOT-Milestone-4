@@ -235,7 +235,11 @@ def qdrant_index_status(
 ) -> tuple[int, int]:
     """Return approved source count and verified Qdrant point count."""
     config = _read_runtime_config(config_path)
-    result, _ = _collection_info(config, config_path.resolve().parent, request_callable)
+    result, _ = _collection_info(
+        config,
+        config_path.resolve().parent.parent,
+        request_callable,
+    )
     points_count = result.get("points_count")
     if (
         not isinstance(points_count, int)

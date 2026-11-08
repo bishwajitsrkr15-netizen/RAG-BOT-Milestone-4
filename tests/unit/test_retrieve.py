@@ -206,6 +206,29 @@ class RetrieveTests(unittest.TestCase):
             (2, 1),
         )
 
+    def test_qdrant_status_reads_env_from_project_root(self) -> None:
+        self.config_path.parent.parent.joinpath(".env").write_text(
+            "QDRANT_URL=https://qdrant.example\n"
+            "QDRANT_API_KEY=project-root-key\n"
+            "QDRANT_COLLECTION=funds\n",
+            encoding="utf-8",
+        )
+        with patch.dict(
+            "os.environ",
+            {
+                "QDRANT_URL": "",
+                "QDRANT_API_KEY": "",
+                "QDRANT_COLLECTION": "",
+            },
+        ):
+            status = qdrant_index_status(
+                self.config_path,
+                request_callable=self.qdrant.request,
+            )
+
+        self.assertEqual(status, (2, 1))
+        self.assertEqual(self.qdrant.requests[-1]["api_key"], "project-root-key")
+
     def test_requires_qdrant_credentials(self) -> None:
         with patch.dict(
             "os.environ",

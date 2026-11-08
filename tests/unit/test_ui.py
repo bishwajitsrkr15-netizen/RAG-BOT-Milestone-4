@@ -2,6 +2,7 @@ import subprocess
 import sys
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 from streamlit.testing.v1 import AppTest
 
@@ -25,7 +26,8 @@ class FAQUiTests(unittest.TestCase):
 
     def test_welcome_disclaimer_and_three_examples_render(self) -> None:
         app_path = Path(__file__).resolve().parents[2] / "src" / "ui" / "app.py"
-        app = AppTest.from_file(str(app_path)).run()
+        with patch("src.retrieval.retrieve.read_setting", return_value=None):
+            app = AppTest.from_file(str(app_path)).run()
 
         self.assertEqual(len(app.exception), 0)
         button_labels = [button.label for button in app.button]
@@ -48,8 +50,9 @@ class FAQUiTests(unittest.TestCase):
 
     def test_empty_submission_shows_input_prompt(self) -> None:
         app_path = Path(__file__).resolve().parents[2] / "src" / "ui" / "app.py"
-        app = AppTest.from_file(str(app_path)).run()
-        app.button[0].click().run()
+        with patch("src.retrieval.retrieve.read_setting", return_value=None):
+            app = AppTest.from_file(str(app_path)).run()
+            app.button[0].click().run()
 
         self.assertEqual(len(app.exception), 0)
         self.assertTrue(any("Enter a question" in element.value for element in app.warning))

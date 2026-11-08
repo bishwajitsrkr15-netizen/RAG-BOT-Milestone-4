@@ -2,13 +2,19 @@ import json
 import os
 import tempfile
 import unittest
+from io import BytesIO
 from pathlib import Path
 from typing import Any
 from unittest.mock import patch
 
 import yaml
 
-from src.retrieval.answer import AnswerError, _read_env_setting, answer_question
+from src.retrieval.answer import (
+    AnswerError,
+    _groq_complete,
+    _read_env_setting,
+    answer_question,
+)
 from src.retrieval.retrieve import RetrievedChunk
 
 
@@ -60,6 +66,38 @@ class AnswerTests(unittest.TestCase):
                 result = _read_env_setting("GROQ_API_KEY", Path(self.temp.name))
 
         self.assertEqual(result, "test-key")
+
+    def test_groq_request_uses_bearer_authentication(self) -> None:
+        captured_headers: dict[str, str] = {}
+
+        def request_callable(request: Any, timeout: int) -> BytesIO:
+            captured_headers.update(request.headers)
+            return BytesIO(
+                json.dumps(
+                    {"choices": [{"message": {"content": "The expense ratio is 0.5%."}}]}
+                ).encode("utf-8")
+            )
+
+        with patch(
+            "src.retrieval.answer._read_env_setting",
+            return_value="test-key",
+        ):
+            result = _groq_complete(
+                "What is the expense ratio?",
+                [self.chunk],
+                config={
+                    "llm": {
+                        "provider": "groq",
+                        "api_key_env": "GROQ_API_KEY",
+                        "model_env": "LLM_MODEL",
+                    }
+                },
+                config_path=self.config_path,
+                request_callable=request_callable,
+            )
+
+        self.assertEqual(result, "The expense ratio is 0.5%.")
+        self.assertEqual(captured_headers["Authorization"], "Bearer test-key")
 
     def test_supported_factual_answer_uses_grounded_source_and_freshness(self) -> None:
         result = answer_question(
