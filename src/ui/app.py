@@ -3,9 +3,14 @@
 from __future__ import annotations
 
 import logging
+import sys
 from pathlib import Path
 
 import streamlit as st
+
+ROOT = Path(__file__).resolve().parents[2]
+if str(ROOT) not in sys.path:
+    sys.path.insert(0, str(ROOT))
 
 from src.ingestion.scrape_documents import ScrapeError
 from src.retrieval.answer import AnswerError, AnswerResponse, answer_question
@@ -13,7 +18,6 @@ from src.retrieval.retrieve import qdrant_index_status
 
 
 LOGGER = logging.getLogger(__name__)
-ROOT = Path(__file__).resolve().parents[2]
 CONFIG_PATH = ROOT / "config" / "app.yaml"
 EXAMPLE_QUESTIONS = (
     "What is the expense ratio of HDFC Large Cap Fund?",

@@ -1,3 +1,5 @@
+import subprocess
+import sys
 import unittest
 from pathlib import Path
 
@@ -5,6 +7,22 @@ from streamlit.testing.v1 import AppTest
 
 
 class FAQUiTests(unittest.TestCase):
+    def test_imports_when_started_from_the_app_directory(self) -> None:
+        app_path = Path(__file__).resolve().parents[2] / "src" / "ui" / "app.py"
+        result = subprocess.run(
+            [
+                sys.executable,
+                "-c",
+                "import runpy; runpy.run_path('app.py')",
+            ],
+            cwd=app_path.parent,
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+
+        self.assertEqual(result.returncode, 0, result.stderr)
+
     def test_welcome_disclaimer_and_three_examples_render(self) -> None:
         app_path = Path(__file__).resolve().parents[2] / "src" / "ui" / "app.py"
         app = AppTest.from_file(str(app_path)).run()
